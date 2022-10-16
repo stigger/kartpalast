@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kartpalast Stats</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-gH2yIJqKdNHPEq0n4Mqa/HGKIhSkIHeL5AyhkYV8i59U5AR6csBvApHHNl/vI1Bx" crossorigin="anonymous">
+</head>
+<style>
+    input[type=number]::-webkit-inner-spin-button,
+    input[type=number]::-webkit-outer-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+</style>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.0/dist/js/bootstrap.bundle.min.js"
+        integrity="sha384-A3rJD856KowSb7dwlZdYEkO39Gagi7vIsF0jrRAoQmDKKtQBHUuLZ9AsSv4jD4Xa"
+        crossorigin="anonymous"></script>
+<script>
+    const url = '/kartpalast'
+
+    let timeout = null;
+    let highlightId = null;
+    let highlightDriver = null;
+    let highlightKart = null;
+    let highlightRaceway = null;
+
+    const $ = id => document.getElementById(id);
+
+    function updateUrl(url) {
+        clearTimeout(timeout)
+        timeout = setTimeout(() => window.location.hash = url, 1000)
+    }
+
+    function clear(keepUrl=false) {
+        Array.from(document.getElementsByClassName("col-xl")).forEach(e => e.remove());
+        if (!keepUrl) {
+            updateUrl('')
+        }
+    }
+
+    function postUpdate() {
+        const page = window.location.hash.split('/')[0];
+        const isKartPage = page === '#kart' || page === '';
+        $('kartNumberForm').hidden = !isKartPage
+        $('title').hidden = isKartPage
+    }
+
+    const CellType = {
+        date: Symbol("date"),
+        driver: Symbol("driver"),
+        time: Symbol("time"),
+        kart: Symbol("kart"),
+        segment1: Symbol("segment1"),
+        segment2: Symbol("segment2"),
+    }
+
+    function newRow(table, data, cellTypes) {
+        const row = table.insertRow();
+        const {id, kart, driver, date, time, bestSegment1, bestSegment2} = data;
+        if (id === highlightId || kart === highlightKart || driver === highlightDriver) {
+            row.setAttribute('class', 'table-secondary');
+        }
+        const cellCount = Object.keys(data).length - 1;
+        const cells = [];
+        for (let i = 0; i < cellCount; i++) {
+            const cell = row.insertCell();
+            cells.push(cell);
+
+            switch (cellTypes[i]) {
+                case CellType.date:
+                    cell.setAttribute("class", "font-monospace w-25");
+                    break;
+                case CellType.segment1:
+                case CellType.segment2:
+                case CellType.kart:
+                case CellType.time:
+                    cell.setAttribute('class', 'font-monospace text-end');
+                    break;
+            }
+
+            switch (cellTypes[i]) {
+                case CellType.date:
+                    cell.innerText = date;
+                    break;
+                case CellType.kart:
+                    cell.innerHTML = `<a href="#kart/${kart}" class="link-secondary" onclick="highlightId=${id}">#${kart}</a>`;
+                    break
+                case CellType.driver:
+                    cell.innerHTML = `<a href="#driver/${driver}" class="link-secondary" onclick="highlightId=${id}">${driver}</a>`;
+                    break
+                case CellType.time:
+                    cell.innerText = time;
+                    break;
+                case CellType.segment1:
+                    cell.innerText = bestSegment1;
+                    cell.setAttribute('id', `seg1_${id}`);
+                    break;
+                case CellType.segment2:
+                    cell.innerText = bestSegment2;
+                    cell.setAttribute('id', `seg2_${id}`);
+                    break;
+            }
+        }
+        return cells;
+    }
+
+    function newTable(raceway, columns, cellTypes, setHighlightRaceway, setHighlightKart, setHighlightDriver) {
+        let container = $("container");
+        container.setAttribute("class", `row row-cols-xl-${columns} mb-3`)
+
+        const div = document.createElement('div');
+        container.appendChild(div);
+        div.setAttribute("class", "col-xl");
+        const table = document.createElement('table');
+        div.appendChild(table);
+
+        if (setHighlightRaceway) {
+            let additionalHighlight = "";
+            if (setHighlightKart != null) {
+                additionalHighlight += `highlightKart=${setHighlightKart};`;
+            }
+            if (setHighlightDriver != null) {
+                additionalHighlight += `highlightDriver='${setHighlightDriver}';`;
+            }
+            table.createCaption().innerHTML = `<a href="#raceways" class="link-secondary" onclick="highlightRaceway='${raceway.raceway}';${additionalHighlight}">${raceway.raceway}</a>`;
+        }
+        else {
+            table.createCaption().innerText = raceway.raceway;
+        }
+
+        table.setAttribute("class", "table table-sm caption-top mx-auto");
+        table.setAttribute("style", "max-width: 550px");
+
+        for (const data of raceway.data) {
+            newRow(table, data, cellTypes);
+        }
+    }
+
+    function generateTables(resp, cellTypes, setHighlightRaceway=false, setHighlightKart=null, setHighlightDriver=null) {
+        const columns = Math.min(3, resp.length);
+        for (const raceway of resp) {
+            if (raceway == null) {
+                continue;
+            }
+            newTable(raceway, columns, cellTypes, setHighlightRaceway, setHighlightKart, setHighlightDriver);
+        }
+        if (postUpdate != null) {
+            postUpdate();
+        }
+        highlightId = null;
+        highlightRaceway = null;
+        highlightKart = null;
+        highlightDriver = null;
+    }
+
+    function kartStats() {
+        clearTimeout(timeout)
+        const kartNumber = parseInt($('kartNumber').value);
+        if (isNaN(kartNumber)) {
+            clear();
+            return;
+        }
+        document.title = `Kartpalast Stats: #${kartNumber}`
+
+        const xhr = new XMLHttpRequest();
+        xhr.addEventListener('load', function () {
+            clear();
+
+            const resp = JSON.parse(this.responseText);
+            generateTables(resp, [CellType.date, CellType.driver, CellType.time], true, kartNumber);
+
+            updateUrl('kart/' + kartNumber)
+        });
+        xhr.open('GET', `${url}/kart/${kartNumber}`);
+        xhr.send();
+    }
+
+    function driverStats(driver) {
+        const xhr = new XMLHttpRequest();
+        xhr.addEventListener('load', function () {
+            clear(true);
+
+            const resp = JSON.parse(this.responseText);
+
+            $("title").innerHTML = `<h2>${decodeURI(driver)}</h2>`
+            document.title = `Kartpalast Stats: ${decodeURI(driver)}`
+
+            generateTables(resp, [CellType.date, CellType.kart, CellType.time, CellType.segment1, CellType.segment2], true, null, highlightDriver=decodeURI(driver));
+
+            for (const raceway of resp) {
+                let seg1_minValue = Number.MAX_VALUE, seg1_minId = null, seg2_minValue = Number.MAX_VALUE, seg2_minId = null;
+                for (const {id, bestSegment1, bestSegment2} of raceway.data) {
+                    if (parseFloat(bestSegment1) < seg1_minValue) {
+                        seg1_minValue = parseFloat(bestSegment1);
+                        seg1_minId = id;
+                    }
+                    if (parseFloat(bestSegment2) < seg2_minValue) {
+                        seg2_minValue = parseFloat(bestSegment2);
+                        seg2_minId = id;
+                    }
+                }
+                function highlightSegment(id) {
+                    const segCell = $(id);
+                    segCell.setAttribute('class', segCell.getAttribute('class') + ' table-success');
+                }
+                if (seg1_minId != null) {
+                    highlightSegment(`seg1_${seg1_minId}`);
+                }
+                if (seg2_minId != null) {
+                    highlightSegment(`seg2_${seg2_minId}`);
+                }
+            }
+        });
+        xhr.open('GET', `${url}/driver/${encodeURI(driver)}`);
+        xhr.send();
+    }
+
+    function racewaysStats() {
+        const xhr = new XMLHttpRequest();
+        xhr.addEventListener('load', function () {
+            clear(true);
+
+            const resp = JSON.parse(this.responseText);
+
+            $("title").innerHTML = `<h2>Raceways</h2>`
+            document.title = 'Kartpalast Stats: Raceways'
+
+            if (highlightRaceway != null) {
+                for (let [i, raceway] of resp.entries()) {
+                    if (raceway.raceway === highlightRaceway) {
+                        delete resp[i];
+                        resp.unshift(raceway);
+                        break;
+                    }
+                }
+            }
+            generateTables(resp, [CellType.date, CellType.kart, CellType.driver, CellType.time])
+        });
+        xhr.open('GET', `${url}/raceways`);
+        xhr.send();
+    }
+
+    window.onhashchange = window.onload = function () {
+        clearTimeout(timeout)
+
+        const url = window.location.hash.split('/');
+        const formWasHidden = $('kartNumberForm').hidden
+
+        if (url[0] === '#kart') {
+            const kart = parseInt(url[1]);
+            const $kartNumber = $('kartNumber');
+            const curValue = parseInt($kartNumber.value)
+            if (kart !== curValue || formWasHidden) {
+                $kartNumber.value = kart
+                kartStats()
+            }
+        }
+        if (url[0] === '#driver') {
+            driverStats(url[1])
+        }
+        else if (url[0] === '#raceways') {
+            racewaysStats()
+        }
+        else {
+            postUpdate()
+        }
+    }
+</script>
+<header style="height: 90px" class="py-4">
+    <div id="title" class="text-center" hidden></div>
+    <div id="kartNumberForm" class="form-floating mx-auto" style="width: 70px" hidden>
+        <input type="number" inputmode="numeric" class="form-control" id="kartNumber" placeholder="90"
+               onkeyup="kartStats()" onfocus="this.value=''">
+        <label for="kartNumber">Kart #</label>
+    </div>
+</header>
+<div class="container">
+    <div id="container" class="row row-cols-xl-3 mb-3">
+    </div>
+</div>
+</body>
+</html>
