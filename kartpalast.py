@@ -90,7 +90,7 @@ else:
 
 def retrieve_stats(query_executor, data_extractor, dedupe_index=0, sort=False, limit=10):
     stats = []
-    for rw in ['Raceway 1', 'Raceway 2', 'Raceway 3', 'Raceway R1-R2', 'TBO']:
+    for rw in ['Raceway 1', 'Raceway 2', 'Raceway 3', 'Raceway R1-R2', 'Raceway R1 - R3', 'TBO']:
         results = query_executor(rw)
 
         dedupe = set()
@@ -113,7 +113,7 @@ def retrieve_stats(query_executor, data_extractor, dedupe_index=0, sort=False, l
             if len(items) == limit:
                 break
         if len(items) > 0:
-            stats.append({'raceway': rw, 'data': items})
+            stats.append({'raceway': rw.replace(' - ', '-'), 'data': items})
     if sort:
         stats = sorted(stats, key=lambda x: -len(x['data']))
     return json.dumps(stats).encode('utf-8')
