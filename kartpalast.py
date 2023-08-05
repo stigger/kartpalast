@@ -19,12 +19,12 @@ tz = pytz.timezone('Europe/Berlin')
 
 
 class Raceways(Enum):
-    raceway1 = (5, 'RW1', urllib.parse.quote('Raceway 1'))
-    raceway2 = (4, 'RW2', urllib.parse.quote('Raceway 2'))
-    raceway3 = (6, 'RW3', urllib.parse.quote('Raceway 3'))
-    raceway1_2 = (39, 'RW1&2', urllib.parse.quote('Raceway 1 & 2'))
-    raceway1_3 = (22, 'RW1&3', urllib.parse.quote('Raceway 1 & 3'))
-    tbo = (38, 'TBO', urllib.parse.quote('TBO '))
+    raceway1 = (5, 'RW1', urllib.parse.quote('Raceway 1'), 'Raceway 1', 35)
+    raceway2 = (4, 'RW2', urllib.parse.quote('Raceway 2'), 'Raceway 2', 21)
+    raceway3 = (6, 'RW3', urllib.parse.quote('Raceway 3'), 'Raceway 3', 43)
+    raceway1_2 = (39, 'RW1&2', urllib.parse.quote('Raceway 1 & 2'), 'Raceway R1-R2', 57)
+    raceway1_3 = (22, 'RW1&3', urllib.parse.quote('Raceway 1 & 3 '), 'Raceway R1 - R3', 0)
+    tbo = (38, 'TBO', urllib.parse.quote('TBO '), 'TBO', 0)
 
 
 calendarEvents = []
@@ -51,7 +51,7 @@ async def calendar(force_reload=True):
                     return rw, await resp.json()
 
             tasks = []
-            for rw in [Raceways.raceway1, Raceways.raceway2, Raceways.raceway3, Raceways.raceway1_2, Raceways.tbo]:
+            for rw in [Raceways.raceway1, Raceways.raceway2, Raceways.raceway3, Raceways.raceway1_2, Raceways.raceway1_3, Raceways.tbo]:
                 tasks.append(req(session, rw))
             calendarEvents = await asyncio.gather(*tasks)
 
@@ -90,7 +90,8 @@ else:
 
 def retrieve_stats(query_executor, data_extractor, dedupe_index=0, sort=False, limit=10):
     stats = []
-    for rw in ['Raceway 1', 'Raceway 2', 'Raceway 3', 'Raceway R1-R2', 'Raceway R1 - R3', 'TBO']:
+    for rw in [Raceways.raceway1, Raceways.raceway2, Raceways.raceway3, Raceways.raceway1_2, Raceways.raceway1_3, Raceways.tbo]:
+        rw = rw.value
         results = query_executor(rw)
 
         dedupe = set()
@@ -108,12 +109,12 @@ def retrieve_stats(query_executor, data_extractor, dedupe_index=0, sort=False, l
                 'date': date,
                 'time': timeToString(bestLap),
             }
-            item.update(data_extractor(result[3:]))
+            item.update(data_extractor(rw, result[3:]))
             items.append(item)
             if len(items) == limit:
                 break
         if len(items) > 0:
-            stats.append({'raceway': rw.replace(' - ', '-'), 'data': items})
+            stats.append({'raceway': rw[3].replace(' - ', '-'), 'data': items})
     if sort:
         stats = sorted(stats, key=lambda x: -len(x['data']))
     return json.dumps(stats).encode('utf-8')
@@ -129,27 +130,47 @@ def kart_stats(kart):
     def query(rw):
         return db.execute(
             'select id, timestamp, bestLap, driver from kart_results where kart=? and bestLap is not null and '
-            'track=? and timestamp > ? order by bestLap limit 0, 50',
-            (kart, rw, int(time.time() * 1000) - 45 * 86400_000)).fetchall()
+            'track=? and timestamp > ? and bestLap >= ? order by bestLap limit 0, 50',
+            (kart, rw[3], int(time.time() * 1000) - 45 * 86400_000, rw[4])).fetchall()
 
-    def extract(result):
+    def extract(_, result):
         return {'driver': result[0]}
 
     return retrieve_stats(query, extract)
+
+
+def order_segments(rw, best_segment1, best_segment2):
+    if rw == Raceways.raceway1_3.value and best_segment1 > best_segment2:
+        return best_segment2, best_segment1
+
+    if rw == Raceways.raceway1_2.value:
+        if best_segment1 < 30 or best_segment2 < 30:
+            if best_segment1 > best_segment2:
+                return best_segment2, best_segment1
+        else:
+            if best_segment1 < best_segment2:
+                return best_segment2, best_segment1
+
+    return best_segment1, best_segment2
 
 
 def driver_stats(driver):
     def query(rw):
         return db.execute(
             'select id, timestamp, bestLap, kart, bestSegment1, bestSegment2 from kart_results where driver=? '
-            'and bestLap is not null and track=? order by bestLap limit 0, 50', (driver, rw)).fetchall()
+            'and bestLap is not null and track=? order by bestLap limit 0, 50', (driver, rw[3])).fetchall()
 
-    def extract(result):
+    def extract(rw, result):
         (kart, bestSegment1, bestSegment2) = result
+        (bestSegment1, bestSegment2) = order_segments(rw, bestSegment1, bestSegment2)
+        if bestSegment1 is not None:
+            bestSegment1 = "%06.3f" % bestSegment1
+        if bestSegment2 is not None:
+            bestSegment2 = "%06.3f" % bestSegment2
         return {
             'kart': kart,
-            'bestSegment1': timeToString(bestSegment1),
-            'bestSegment2': timeToString(bestSegment2),
+            'bestSegment1': bestSegment1,
+            'bestSegment2': bestSegment2,
         }
 
     return retrieve_stats(query, extract, sort=True, limit=20)
@@ -158,10 +179,10 @@ def driver_stats(driver):
 def raceways_stats():
     def query(rw):
         return db.execute(
-            'select id, timestamp, bestLap, kart, driver from kart_results where bestLap is not null and track=? and timestamp>=?'
-            'order by bestLap limit 0, 50', (rw, int(time.time() * 1000) - 45 * 86400_000)).fetchall()
+            'select id, timestamp, bestLap, kart, driver from kart_results where bestLap is not null and track = ? and timestamp >= ? and bestLap >= ?'
+            'order by bestLap limit 0, 50', (rw[3], int(time.time() * 1000) - 45 * 86400_000, rw[4])).fetchall()
 
-    def extract(result):
+    def extract(_, result):
         (kart, driver) = result
         return {'kart': kart, 'driver': driver}
 
