@@ -39,10 +39,13 @@ running_races = set()
 track_ids = {'Raceway 1.00': 5, 'Raceway 2': 4, 'Raceway 3.00': 6, 'Raceway R1-R2': 39, 'Raceway R1 - R3': 22, 'TBO': 38}
 
 
-def on_message(_, message):
-    msg = json.loads(message[:-1])
-    if 'type' in msg:
-        if msg['type'] == 1:
+def on_message(_, messages):
+    for message in messages.split('\x1e'):
+      if len(message) == 0:
+        continue
+      msg = json.loads(message)
+      if 'type' in msg:
+       if msg['type'] == 1:
             if msg['target'] == 'updateData':
                 for m in msg['arguments']:
                     if m['type'] == 'timer':
