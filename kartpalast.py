@@ -41,7 +41,7 @@ async def calendar(force_reload=True):
         if force_reload or lastUpdate + 60 < time.time():
             lastUpdate = time.time()
             from_date = datetime.utcnow().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-            to_date = from_date + timedelta(days=10)
+            to_date = from_date + timedelta(days=7)
             from_date = from_date.isoformat()
             to_date = to_date.isoformat()
 
